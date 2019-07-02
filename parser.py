@@ -12,11 +12,20 @@ def checkTableExistence(conn, name):
     c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (name,)) 
     return len(c.fetchall()) == 1 
 
+def getPageContent(url):
+    request = requests.get(url=URL) 
+    data = json.loads(request.text[13:])
+
+    if data['success']:
+        return data
+    else: 
+        getPageContent(url)
+
+
 KEYS_DELETE = ['ChangePercent', 'Close']
 class Parser:
     def parse(self, URL): 
-        request = requests.get(url=URL) 
-        data = json.loads(request.text[13:])
+        data = getPageContent(URL)
     
         records = []
         for record in data['data']: 
@@ -70,8 +79,7 @@ class Links:
     
     def _total_page_number(self): 
         URL = "http://data.eastmoney.com/DataCenter_V3/jgdy/xx.ashx?pagesize=50&page=1&js=var%20AoofQLPM&param=&sortRule=-1&sortType=0&rt=52045947"
-        request = requests.get(url=URL)
-        data = json.loads(request.text[13:])
+        data = getPageContent(URL)
         self._total_pages = data['pages']
 
         return self._total_pages
