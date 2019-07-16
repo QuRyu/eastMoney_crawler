@@ -1,7 +1,7 @@
 import json 
 import datetime 
 from collections import namedtuple 
-import time 
+from multiprocessing import Pool 
 
 import requests 
 import sqlite3 
@@ -24,17 +24,16 @@ def getPageContent(url):
 
 
 KEYS_DELETE = ['ChangePercent', 'Close']
-class Parser:
-    def parse(self, URL): 
-        data = getPageContent(URL)
-    
-        records = []
-        for record in data['data']: 
-            for key in KEYS_DELETE:
-                del record[key] 
-            records.append(record)
-    
-        return records 
+def parse(URL): 
+    data = getPageContent(URL)
+
+    records = []
+    for record in data['data']: 
+        for key in KEYS_DELETE:
+            del record[key] 
+        records.append(record)
+
+    return records 
 
 class Links: 
     def __init__(self, conn):
@@ -93,10 +92,10 @@ class Links:
 
 
 class Scheduler:
-    def __init__(self, links, parser, conn):
+    def __init__(self, links, conn, pool):
         self._links = links
-        self._parser = parser
         self._conn = conn 
+        self._pool = pool
 
         # check if the table exists 
         if not checkTableExistence(self._conn, 'records'):
@@ -128,9 +127,10 @@ class Scheduler:
                     run = False 
                     break 
             
+            parsed = self._pool.map(parse, urls)
             records = [] 
-            for url in urls:
-                records.extend(self._parser.parse(url))
+            for record in parsed:
+                records.extend(record)
 
             cursor.execute("BEGIN TRANSACTION;")
             cursor.executemany('''INSERT INTO records VALUES 
@@ -143,8 +143,8 @@ class Scheduler:
 def main():
     conn = sqlite3.connect("survey.db") 
     link = Links(conn)
-    parser = Parser() 
-    scheduler = Scheduler(link, parser, conn) 
+    pool = Pool()
+    scheduler = Scheduler(link, conn, pool) 
 
     # download new data 
     scheduler.run() 
