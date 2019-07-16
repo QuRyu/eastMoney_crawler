@@ -35,6 +35,32 @@ def parse(URL):
 
     return records 
 
+# merge ranges together 
+# e.g. merge [(1,3), (4,7), (10, 12), (13, 15)] into [(1, 7), (10, 15)]
+# Invariance: 1. Each range does not overlap with others 
+#             2. Input is sorted by the start key 
+def merge_ranges(history):
+    length = len(history)
+    if length < 2:
+        return history
+    elif length == 2:  # merge them if possible 
+        if history[0][1] + 1 == history[1][0]:
+            return [(history[0][0], history[1][1])]
+        else:
+            return history
+    else:
+        middle = length / 2 
+        left = merge_ranges(history[:middle])
+        right = merge_ranges(history[middle:])
+
+        (llen, rlen) = (len(left), len(right))
+
+        if left[llen-1][1] + 1 == right[0][0]:
+            merged = (left[llen-1][0], right[0][1])
+            return llen[:llen-1].append(merged).extend(right[1:])
+        else:
+            left.extend(right)
+
 class Indexer:
     def __init__(self, total_page, last_page_items):
         self.total_page = total_page
@@ -90,18 +116,22 @@ class UrlGenerator:
         cursor.execute("INSERT INTO pullHistory VALUES (?,?)", [str(date.date()), self._total_pages])
         self._conn.commit()
  
-    def _get_latest_page(self):
-        if not checkTableExistence(self._conn, "pullHistory"):
+    def _get_pull_history(self):
+        if not checkTableExistence(self._conn, "pull"):
             self._create_table()
             return None 
         
         # check if there is any query before 
         cursor = self._conn.cursor()
-        cursor.execute("SELECT * FROM pullHistory ORDER BY pageNumber")
+        cursor.execute("SELECT * FROM pullHistory ORDER BY index_start")
         history = cursor.fetchall()
 
-        return history[-1][1]
-    
+        if len(history) == 0:
+          return None
+        else:
+            # merge consecutive ranges into larger ones
+            history = merge_ranges(history)  
+
     def _total_page_number(self): 
         URL = "http://data.eastmoney.com/DataCenter_V3/jgdy/xx.ashx?pagesize=50&page=1&js=var%20AoofQLPM&param=&sortRule=-1&sortType=0&rt=52045947"
         data = getPageContent(URL)
@@ -111,8 +141,8 @@ class UrlGenerator:
 
     def _create_table(self):
         c = self._conn.cursor() 
-        c.execute('''CREATE TABLE pullHistory
-                     (date text, pageNumber, INTEGER)''')
+        c.execute('''CREATE TABLE history
+                     (index_start INTEGER, index_end INTEGER)''')
         self._conn.commit()
 
 
