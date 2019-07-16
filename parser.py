@@ -15,7 +15,11 @@ def checkTableExistence(conn, name):
 
 def getPageContent(url):
     request = requests.get(url=url) 
-    data = json.loads(request.text[13:])
+    try:
+        data = json.loads(request.text[13:])
+    except JSONDecodeError as e:
+      print("JSON decode error on url {}\ntry again".format(url))
+      return getPageContent(url)
 
     if data['success']:
         return data
@@ -69,7 +73,10 @@ class Indexer:
         self.total_items = (total_page-1) * 50 + last_page_items
 
     def index(self, page: int, pos: int) -> int:
-        return (self.total_page - page - 1) * 50 + self.last_page_items + (50 - pos + 1)
+        if page == self.total_page:
+            return self.last_page_items - pos + 1
+        else:
+            return (self.total_page - page - 1) * 50 + self.last_page_items + (50 - pos + 1)
 
     def rev_index(self, id: int) -> (int, int): 
         if id <= self.last_page_items:
@@ -84,6 +91,9 @@ class Indexer:
                 relative_pos = 50 
 
             return (self.total_page-1-relative_page, 50-relative_pos+1)
+
+    def total_range(self) -> (int, int): 
+        return (1, (self.total_page-1)*50 + self.last_page_items)
 
 
 class UrlGenerator: 
@@ -113,7 +123,7 @@ class UrlGenerator:
     def update_db(self):
         date = datetime.datetime.now()
         cursor = self._conn.cursor()
-        cursor.execute("INSERT INTO pullHistory VALUES (?,?)", [str(date.date()), self._total_pages])
+        cursor.execute("INSERT INTO history VALUES (?,?)", [str(date.date()), self._total_pages])
         self._conn.commit()
  
     def _get_pull_history(self):
@@ -123,7 +133,7 @@ class UrlGenerator:
         
         # check if there is any query before 
         cursor = self._conn.cursor()
-        cursor.execute("SELECT * FROM pullHistory ORDER BY index_start")
+        cursor.execute("SELECT * FROM history ORDER BY index_start")
         history = cursor.fetchall()
 
         if len(history) == 0:
