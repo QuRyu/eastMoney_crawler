@@ -35,7 +35,32 @@ def parse(URL):
 
     return records 
 
-class Links: 
+class Indexer:
+    def __init__(self, total_page, last_page_items):
+        self.total_page = total_page
+        self.last_page_items = last_page_items
+
+        self.total_items = (total_page-1) * 50 + last_page_items
+
+    def index(self, page: int, pos: int) -> int:
+        return (self.total_page - page - 1) * 50 + self.last_page_items + (50 - pos + 1)
+
+    def rev_index(self, id: int) -> (int, int): 
+        if id <= self.last_page_items:
+            return (self.total_page, self.last_page_items-id+1)
+        else:
+            id_cleaned = id - self.last_page_items
+            relative_pos = id_cleaned % 50 
+
+            relative_page = int(id_cleaned / 50)
+            if id_cleaned == relative_page * 50: 
+                relative_page -= 1 
+                relative_pos = 50 
+
+            return (self.total_page-1-relative_page, 50-relative_pos+1)
+
+
+class UrlGenerator: 
     def __init__(self, conn):
         self._conn = conn 
         latest_page = self._get_latest_page() 
