@@ -1,6 +1,7 @@
 import json 
 import datetime 
 from collections import namedtuple 
+import time 
 
 import requests 
 import sqlite3 
@@ -13,7 +14,7 @@ def checkTableExistence(conn, name):
     return len(c.fetchall()) == 1 
 
 def getPageContent(url):
-    request = requests.get(url=URL) 
+    request = requests.get(url=url) 
     data = json.loads(request.text[13:])
 
     if data['success']:
@@ -67,7 +68,7 @@ class Links:
  
     def _get_latest_page(self):
         if not checkTableExistence(self._conn, "pullHistory"):
-            __create_table()
+            self._create_table()
             return None 
         
         # check if there is any query before 
@@ -84,7 +85,7 @@ class Links:
 
         return self._total_pages
 
-    def __create_table(self):
+    def _create_table(self):
         c = self._conn.cursor() 
         c.execute('''CREATE TABLE pullHistory
                      (date text, pageNumber, INTEGER)''')
@@ -112,17 +113,30 @@ class Scheduler:
         def v_generator(records):
             for r in records:
                 yield list(r.values())
-                
-        while True: 
-            url = self._links.yield_url()
-            
-            if url == None: # no more data to download 
-                break 
 
-            records = self._parser.parse(url)
-            self._conn.executemany('''INSERT INTO records VALUES 
+
+        cursor = self._conn.cursor()
+        run = True 
+
+        while run: 
+            urls = [] 
+            for i in range(0, 10): 
+                url = self._links.yield_url()
+                if url != None:  # no more data to download 
+                    urls.append(url)
+                else:
+                    run = False 
+                    break 
+            
+            records = [] 
+            for url in urls:
+                records.extend(self._parser.parse(url))
+
+            cursor.execute("BEGIN TRANSACTION;")
+            cursor.executemany('''INSERT INTO records VALUES 
                                     (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',  
                                     v_generator(records))
+            cursor.execute("COMMIT;")
             
     
 
