@@ -43,6 +43,43 @@ class MergeRangeTest(unittest.TestCase):
         merged_ranges = [(1, 7), (10, 15)]
         self.assertEqual(merge_ranges(ranges), merge_ranges)
 
+class RangeHolesTest(unittest.TestCase):
+    def test_range_holes_1(self):
+        ranges = [(1, 7), (10, 15)]
+        min_max_range = (1, 20)
+        holes = [(8, 9), (16, 20)]
+
+        self.assertEqual(find_range_holes(ranges, min_max_range), holes)
+
+    def test_range_holes_2(self):
+        ranges = [(2, 7), (10, 15)]
+        min_max_range = (1, 20)
+        holes = [(1, 1), (8, 9), (16, 20)]
+
+        self.assertEqual(find_range_holes(ranges, min_max_range), holes)
+
+    def test_range_holes_3(self):
+        ranges = [(2, 7), (10, 19)]
+        min_max_range = (1, 20)
+        holes = [(1, 1), (8, 9), (20, 20)]
+
+        self.assertEqual(find_range_holes(ranges, min_max_range), holes)
+
+    def test_range_holes_4(self):
+        ranges = [(2, 7), (10, 20)]
+        min_max_range = (1, 20)
+        holes = [(1, 1), (8, 9)]
+
+        self.assertEqual(find_range_holes(ranges, min_max_range), holes)
+
+    def test_reflexivity(self):
+        ranges = [(2, 7), (10, 20)]
+        min_max_range = (1, 20)
+        self.assertEqual(find_range_holes(find_range_holes(ranges, min_max_range), min_max_range), ranges)
+
+        ranges = [(2, 7), (10, 15)]
+        min_max_range = (1, 20)
+        self.assertEqual(find_range_holes(find_range_holes(ranges, min_max_range), min_max_range), ranges)
 
 if __name__ == "__main__":
     unittest.main()

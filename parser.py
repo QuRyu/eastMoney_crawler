@@ -41,7 +41,9 @@ def parse(URL):
 
 # merge ranges together 
 # e.g. merge [(1,3), (4,7), (10, 12), (13, 15)] into [(1, 7), (10, 15)]
-# Invariance: 1. Each range does not overlap with others 
+# Invariance: 1. Each range does not overlap with others, 
+#                 e.g. given two ranges (a, b) and (c, d), it must follow either a < b < c < d or 
+#                       c < d < a < b 
 #             2. Input is sorted by the start key 
 def merge_ranges(history):
     length = len(history)
@@ -64,6 +66,30 @@ def merge_ranges(history):
             return llen[:llen-1].append(merged).extend(right[1:])
         else:
             left.extend(right)
+
+def find_range_holes(ranges, min_max_range):
+    if len(ranges) == 0:
+        return min_max_range
+
+    (min, max) = min_max_range
+    holes = [] 
+
+    # find the hole between min and ranges 
+    if min != ranges[0][0]: 
+        holes.append((min, ranges[0][0]-1))
+
+    # find holes between ranges 
+    for i in range(0, len(ranges)-1):
+        if ranges[i][1] + 1 != ranges[i+1][0]:
+            holes.append((ranges[i][1]+1, ranges[i+1][0]-1))
+
+    # hole between max and ranges 
+    ranges_len = len(ranges)
+    if max != ranges[ranges_len-1][1]:
+        holes.append((ranges[ranges_len-1][1]+1, max))
+
+    return holes
+
 
 class Indexer:
     def __init__(self, total_page, last_page_items):
