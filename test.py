@@ -97,10 +97,23 @@ class RangeDownloaderTest(unittest.TestCase):
 
         # self.assertEqual(len(records), 10) 
 
-class MajorityVoteTest(unittest.TestCase):
-  def test_1(self):
+class HelperMethods(unittest.TestCase):
+  def test_majority_vote(self):
     data = [2, 2, 5, 6, 7]
     self.assertEqual(majority_vote(data), 2)
+
+  def test_break_range_if_too_large(self):
+    r = (2, 3)
+    self.assertEqual(break_range_if_too_large(r), [r])
+
+    r = (1, 502)  
+    self.assertEqual(break_range_if_too_large(r), [(1, 501), (502, 502)])
+
+    r = (1, 800)
+    data = [(1, 501), (502, 800)]
+    self.assertEqual(break_range_if_too_large(r), data)
+  
+
 
 if __name__ == "__main__":
     unittest.main()

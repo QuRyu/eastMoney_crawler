@@ -1,6 +1,7 @@
 import json 
 import time 
 import datetime 
+import logging 
 from itertools import groupby 
 from collections import namedtuple 
 from multiprocessing import Pool 
@@ -22,7 +23,7 @@ def getPageContent(url):
     try:
         data = json.loads(request.text[13:])
     except JSONDecodeError as e:
-        print("JSON decode error on url {}\ntry again".format(url))
+        logging.warn("JSON decode error on url {}\ntry again".format(url))
         time.sleep(2)
         return getPageContent(url)
 
@@ -31,19 +32,6 @@ def getPageContent(url):
     else: 
         time.sleep(2)
         getPageContent(url)
-
-
-KEYS_DELETE = ['ChangePercent', 'Close']
-def parse(URL): 
-    data = getPageContent(URL)
-
-    records = []
-    for record in data['data']: 
-        for key in KEYS_DELETE:
-            del record[key] 
-        records.append(record)
-
-    return records 
 
 # merge ranges together 
 # e.g. merge [(1,3), (4,7), (10, 12), (13, 15)] into [(1, 7), (10, 15)]
@@ -144,9 +132,6 @@ def pull_history(conn, indexer: Indexer) -> [(int, int)]:
             ranges = merge_ranges(history)
             return ranges
 
-def update_history_db(cursor, start, end): 
-    cursor.execute("INSERT INTO history VALUES (?,?)", [start, end])
-
 def majority_vote(xs): 
     count = {} 
 
@@ -196,6 +181,7 @@ def check_record_table(conn):
                       Maincontent text) ''')
 
 
+KEYS_DELETE = ['ChangePercent', 'Close']
 def process(t):
     (page, items_loc) = t
     content = getPageContent(generate_url(page))
@@ -204,7 +190,10 @@ def process(t):
     items_loc.sort()
     records = [] 
     for i in items_loc:
-        records.append(data[i-1])
+        record = data[i-1] 
+        for key in KEYS_DELETE:
+          del record[key] 
+        records.append(record)
 
     return records 
 
@@ -218,7 +207,6 @@ def download_range(r: (int, int), indexer: Indexer, pool: Pool):
     for k, g in groupby(page_loc, lambda x: x[0]):
         mapeed_g = [el[1] for el in map(tuple, g)]
         item_loc.append((k, mapeed_g))
-    
 
     records = pool.map(process, item_loc)
 
@@ -227,50 +215,53 @@ def download_range(r: (int, int), indexer: Indexer, pool: Pool):
 
     return records
 
-    # def run(self):
-        # def v_generator(records):
-            # for r in records:
-                # yield list(r.values())
+def break_range_if_too_large(r):
+  (start, end) = r 
 
+  if end - start > 500:
+    intervals = [] 
 
-        # cursor = self._conn.cursor()
-        # run = True 
+    while start + 500 < end:
+      intervals.append((start, start + 500))
+      start += 500 
 
-        # while run: 
-            # urls = [] 
-            # for i in range(0, 10): 
-                # url = self._links.yield_url()
-                # if url != None:  # no more data to download 
-                    # urls.append(url)
-                # else:
-                    # run = False 
-                    # break 
-            
-            # parsed = self._pool.map(parse, urls)
-            # records = [] 
-            # for record in parsed:
-                # records.extend(record)
+    if start < end:
+      intervals.append((start+1, end))
 
-            # cursor.execute("BEGIN TRANSACTION;")
-            # cursor.executemany('''INSERT INTO records VALUES 
-                                    # (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',  
-                                    # v_generator(records))
-            # cursor.execute("COMMIT;")
-            
-    
+    return intervals
+
+  else:
+    return [r] 
+
 
 def main():
-    conn = sqlite3.connect("survey.db") 
+  def v_gen(xs):
+    for x in xs:
+      yield list(x.values())
+  conn = sqlite3.connect("survey.db") 
 
-    (total_page, last_page_items) = get_page_info()
-    indexer = Indexer(total_page, last_page_items, 50)
+  (total_page, last_page_items) = get_page_info()
+  indexer = Indexer(total_page, last_page_items, 50)
 
-    history = pull_history(conn, indexer)
-    holes = find_range_holes(history)
+  pool = Pool()
 
-    
+  check_record_table()
+  history = pull_history(conn, indexer)
+  holes = find_range_holes(history)
+  
+  for interval in holes:
+    for subinterval in break_range_if_too_large(interval):
+      (start, end) = subinterval
+      logging.info("downloading records of range ({}, {})".format(start, end))
 
-
+      records = download_range(subinterval, indexer, pool)
+      c = conn.cursor()
+      c.execute("BEGIN TRANSACTION;")
+      c.executemany('''INSERT INTO records VALUES 
+                            (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);''',  
+                            v_gen(records))
+      c.execute("INSERT INTO history VALUES (?,?);", [start, end])
+      c.execute("COMMIT;")
 
 
 if __name__ == "__main__":
