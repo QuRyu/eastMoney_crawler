@@ -1,4 +1,5 @@
 import json 
+import time 
 import datetime 
 from collections import namedtuple 
 from multiprocessing import Pool 
@@ -20,12 +21,14 @@ def getPageContent(url):
     try:
         data = json.loads(request.text[13:])
     except JSONDecodeError as e:
-      print("JSON decode error on url {}\ntry again".format(url))
-      return getPageContent(url)
+        print("JSON decode error on url {}\ntry again".format(url))
+        time.sleep(2)
+        return getPageContent(url)
 
-    if data['success']:
+    if data['success'] and len(data['data']) != 0:
         return data
     else: 
+        time.sleep(2)
         getPageContent(url)
 
 
