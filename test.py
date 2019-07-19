@@ -86,5 +86,21 @@ class RangeHolesTest(unittest.TestCase):
         min_max_range = (1, 20)
         self.assertEqual(find_range_holes(find_range_holes(ranges, min_max_range), min_max_range), ranges)
 
+class RangeDownloaderTest(unittest.TestCase):
+    def test_correctness(self):
+        # (total_page, last_page_items) = get_page_info() 
+        # print("#total pages {}, #items in last page {}".format(total_page, last_page_items))
+        # indexer = Indexer(total_page, 5, last_page_items)
+        r = (1, 10)
+        # pool = Pool()
+        # records = download_range(r, indexer, pool)
+
+        # self.assertEqual(len(records), 10) 
+
+class MajorityVoteTest(unittest.TestCase):
+  def test_1(self):
+    data = [2, 2, 5, 6, 7]
+    self.assertEqual(majority_vote(data), 2)
+
 if __name__ == "__main__":
     unittest.main()

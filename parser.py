@@ -1,6 +1,7 @@
 import json 
 import time 
 import datetime 
+from itertools import groupby 
 from collections import namedtuple 
 from multiprocessing import Pool 
 
@@ -133,18 +134,36 @@ def pull_history(conn, indexer: Indexer) -> [(int, int)]:
         c.execute('''CREATE TABLE history
                      (index_start INTEGER, index_end INTEGER)''')
         conn.commit()
-        return None 
+        return []
     else:
         c.execute("SELECT * FROM history ORDER BY index_start")
         history = cursor.fetch_all()
         if len(history) == None:
-            return None
+            return []
         else:
             ranges = merge_ranges(history)
             return ranges
 
 def update_history_db(cursor, start, end): 
     cursor.execute("INSERT INTO history VALUES (?,?)", [start, end])
+
+def majority_vote(xs): 
+    count = {} 
+
+    for x in xs:
+        if x not in count:
+            count[x] = 1
+        else:
+            count[x] = count[x] + 1 
+
+    largest = -1 
+    key = -1
+    for (k, v) in count.items():
+        if v > largest:
+            key = k 
+            largest = v 
+
+    return key 
 
 # returns (number of pages, #items in last page) 
 def get_page_info() -> (int, int):
@@ -153,75 +172,103 @@ def get_page_info() -> (int, int):
         data = getPageContent(URL)
         return data['pages']
 
-    N = total_page_number()
+            
+    numbers = [] 
+    for _ in range(3): 
+        numbers.append(total_page_number())
+        time.sleep(5)
+    N = majority_vote(numbers)
+
     URL = generate_url(N)
     data = getPageContent(URL)['data']
 
     return (N, len(data))
 
-
-class Scheduler:
-    def __init__(self, links, conn, pool):
-        self._links = links
-        self._conn = conn 
-        self._pool = pool
-
-        # check if the table exists 
-        if not checkTableExistence(self._conn, 'records'):
-            c = self._conn.cursor()
-            c.execute(''' CREATE TABLE records 
-                          (CompanyCode text, CompanyName text, OrgCode text, 
-                          OrgName text, OrgSum text, SCode text, SName text,
-                          NoticeDate text, SurveyDate text, EndDate text, 
-                          Place text, Description text, Orgtype text, 
-                          OrgtypeName text, Personnel text, Licostaff text,
-                          Maincontent text) ''')
-
-    def run(self):
-        def v_generator(records):
-            for r in records:
-                yield list(r.values())
+def check_record_table(conn):
+    if not checkTableExistence(conn, 'records'):
+        c = conn.cursor()
+        c.execute(''' CREATE TABLE records 
+                      (CompanyCode text, CompanyName text, OrgCode text, 
+                      OrgName text, OrgSum text, SCode text, SName text,
+                      NoticeDate text, SurveyDate text, EndDate text, 
+                      Place text, Description text, Orgtype text, 
+                      OrgtypeName text, Personnel text, Licostaff text,
+                      Maincontent text) ''')
 
 
-        cursor = self._conn.cursor()
-        run = True 
+def process(t):
+    (page, items_loc) = t
+    content = getPageContent(generate_url(page))
+    data = content['data']
 
-        while run: 
-            urls = [] 
-            for i in range(0, 10): 
-                url = self._links.yield_url()
-                if url != None:  # no more data to download 
-                    urls.append(url)
-                else:
-                    run = False 
-                    break 
+    items_loc.sort()
+    records = [] 
+    for i in items_loc:
+        records.append(data[i-1])
+
+    return records 
+
+def download_range(r: (int, int), indexer: Indexer, pool: Pool):
+    (left, right) = r 
+    page_loc = [] 
+    for i in range(left, right+1):
+        page_loc.append(indexer.rev_index(i))
+        
+    item_loc = [] 
+    for k, g in groupby(page_loc, lambda x: x[0]):
+        mapeed_g = [el[1] for el in map(tuple, g)]
+        item_loc.append((k, mapeed_g))
+    
+
+    records = pool.map(process, item_loc)
+
+    flatten = lambda l: [item for sublist in l for item in sublist]
+    records = flatten(records)
+
+    return records
+
+    # def run(self):
+        # def v_generator(records):
+            # for r in records:
+                # yield list(r.values())
+
+
+        # cursor = self._conn.cursor()
+        # run = True 
+
+        # while run: 
+            # urls = [] 
+            # for i in range(0, 10): 
+                # url = self._links.yield_url()
+                # if url != None:  # no more data to download 
+                    # urls.append(url)
+                # else:
+                    # run = False 
+                    # break 
             
-            parsed = self._pool.map(parse, urls)
-            records = [] 
-            for record in parsed:
-                records.extend(record)
+            # parsed = self._pool.map(parse, urls)
+            # records = [] 
+            # for record in parsed:
+                # records.extend(record)
 
-            cursor.execute("BEGIN TRANSACTION;")
-            cursor.executemany('''INSERT INTO records VALUES 
-                                    (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',  
-                                    v_generator(records))
-            cursor.execute("COMMIT;")
+            # cursor.execute("BEGIN TRANSACTION;")
+            # cursor.executemany('''INSERT INTO records VALUES 
+                                    # (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',  
+                                    # v_generator(records))
+            # cursor.execute("COMMIT;")
             
     
 
 def main():
     conn = sqlite3.connect("survey.db") 
-    link = Links(conn)
-    pool = Pool()
-    scheduler = Scheduler(link, conn, pool) 
 
-    # download new data 
-    scheduler.run() 
+    (total_page, last_page_items) = get_page_info()
+    indexer = Indexer(total_page, last_page_items, 50)
 
-    # cleanup 
-    link.update_db()
-    conn.commit() 
-    conn.close()
+    history = pull_history(conn, indexer)
+    holes = find_range_holes(history)
+
+    
 
 
 
