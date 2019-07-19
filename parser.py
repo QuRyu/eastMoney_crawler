@@ -97,34 +97,35 @@ def find_range_holes(ranges, min_max_range):
 
 
 class Indexer:
-    def __init__(self, total_page, last_page_items):
+    def __init__(self, total_page, items_in_page, last_page_items):
         self.total_page = total_page
         self.last_page_items = last_page_items
+        self.items_in_page = items_in_page
 
-        self.total_items = (total_page-1) * 50 + last_page_items
+        self.total_items = (total_page-1) * self.items_in_page + last_page_items
 
     def index(self, page: int, pos: int) -> int:
         if page == self.total_page:
             return self.last_page_items - pos + 1
         else:
-            return (self.total_page - page - 1) * 50 + self.last_page_items + (50 - pos + 1)
+            return (self.total_page - page - 1) * self.items_in_page + self.last_page_items + (self.items_in_page - pos + 1)
 
     def rev_index(self, id: int) -> (int, int): 
         if id <= self.last_page_items:
             return (self.total_page, self.last_page_items-id+1)
         else:
             id_cleaned = id - self.last_page_items
-            relative_pos = id_cleaned % 50 
+            relative_pos = id_cleaned % self.items_in_page 
 
-            relative_page = int(id_cleaned / 50)
-            if id_cleaned == relative_page * 50: 
+            relative_page = int(id_cleaned / self.items_in_page)
+            if id_cleaned == relative_page * self.items_in_page: 
                 relative_page -= 1 
-                relative_pos = 50 
+                relative_pos = self.items_in_page 
 
-            return (self.total_page-1-relative_page, 50-relative_pos+1)
+            return (self.total_page-1-relative_page, self.items_in_page-relative_pos+1)
 
     def total_range(self) -> (int, int): 
-        return (1, (self.total_page-1)*50 + self.last_page_items)
+        return (1, (self.total_page-1)*self.items_in_page + self.last_page_items)
 
 def pull_history(conn, indexer: Indexer) -> [(int, int)]:
     c = conn.cursor()

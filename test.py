@@ -7,15 +7,20 @@ from  parser import *
 
 class IndexerTest(unittest.TestCase):
     def test_index(self):
-        indexer = Indexer(4, 20)
+        indexer = Indexer(4, 50, 20)
 
         self.assertEqual(indexer.index(4, 20), 1)
         self.assertEqual(indexer.index(4, 1), 20)
         self.assertEqual(indexer.index(3, 40), 31)
         self.assertEqual(indexer.index(3, 1), 70)
 
+    def test_rev_index_2(self):
+        indexer = Indexer(2, 5, 5)
+
+        self.assertEqual(indexer.rev_index(10), (1, 1))
+
     def test_rev_index(self):
-        indexer = Indexer(4, 20)
+        indexer = Indexer(4, 50, 20)
 
         self.assertEqual(indexer.rev_index(1), (4, 20))
         self.assertEqual(indexer.rev_index(20), (4, 1))
@@ -23,12 +28,12 @@ class IndexerTest(unittest.TestCase):
         self.assertEqual(indexer.rev_index(70), (3, 1))
 
     def test_total_range(self):
-        indexer = Indexer(4, 20)
+        indexer = Indexer(4, 50, 20)
 
         self.assertEqual(indexer.total_range(), (1, 170))
 
     def test1(self):
-        indexer = Indexer(4, 20)
+        indexer = Indexer(4, 50, 20)
 
         index = 170
         for i in range(1, 4):
