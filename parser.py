@@ -2,6 +2,7 @@ import json
 import time 
 import datetime 
 import logging 
+from typing import *
 from itertools import groupby 
 from collections import namedtuple 
 from multiprocessing import Pool 
@@ -22,16 +23,18 @@ def getPageContent(url):
     request = requests.get(url=url) 
     try:
         data = json.loads(request.text[13:])
-    except JSONDecodeError as e:
-        logging.warn("JSON decode error on url {}\ntry again".format(url))
+    except json.JSONDecodeError as e:
+        logging.warning("JSON decode error on url {}\ntry again".format(url))
         time.sleep(2)
         return getPageContent(url)
 
     if data['success'] and len(data['data']) != 0:
         return data
     else: 
+        if len(data['data']) == 0:
+          logging.warning("empty data field from url {}".format(url))
         time.sleep(2)
-        getPageContent(url)
+        return getPageContent(url)
 
 # merge ranges together 
 # e.g. merge [(1,3), (4,7), (10, 12), (13, 15)] into [(1, 7), (10, 15)]
@@ -39,7 +42,7 @@ def getPageContent(url):
 #                 e.g. given two ranges (a, b) and (c, d), it must follow either a < b < c < d or 
 #                       c < d < a < b 
 #             2. Input is sorted by the start key 
-def merge_ranges(history):
+def merge_ranges(history: List[Tuple[int, int]]) -> List[Tuple[int, int]]:
     length = len(history)
     if length < 2:
         return history
@@ -49,7 +52,7 @@ def merge_ranges(history):
         else:
             return history
     else:
-        middle = length / 2 
+        middle = int(length / 2)
         left = merge_ranges(history[:middle])
         right = merge_ranges(history[middle:])
 
@@ -57,13 +60,17 @@ def merge_ranges(history):
 
         if left[llen-1][1] + 1 == right[0][0]:
             merged = (left[llen-1][0], right[0][1])
-            return llen[:llen-1].append(merged).extend(right[1:])
+            left.pop()
+            left.append(merged)
+            left.extend(right[1:])
+            return left 
         else:
             left.extend(right)
+            return left 
 
-def find_range_holes(ranges, min_max_range):
+def find_range_holes(ranges: List[Tuple[int, int]], min_max_range: Tuple[int, int]) -> List[Tuple[int, int]]:
     if len(ranges) == 0:
-        return min_max_range
+        return [min_max_range]
 
     (min, max) = min_max_range
     holes = [] 
@@ -99,7 +106,7 @@ class Indexer:
         else:
             return (self.total_page - page - 1) * self.items_in_page + self.last_page_items + (self.items_in_page - pos + 1)
 
-    def rev_index(self, id: int) -> (int, int): 
+    def rev_index(self, id: int) -> Tuple[int, int]: 
         if id <= self.last_page_items:
             return (self.total_page, self.last_page_items-id+1)
         else:
@@ -113,26 +120,28 @@ class Indexer:
 
             return (self.total_page-1-relative_page, self.items_in_page-relative_pos+1)
 
-    def total_range(self) -> (int, int): 
+    def total_range(self) -> Tuple[int, int]: 
         return (1, (self.total_page-1)*self.items_in_page + self.last_page_items)
 
-def pull_history(conn, indexer: Indexer) -> [(int, int)]:
-    c = conn.cursor()
-    if not checkTableExistence("history"): # create the table 
+def pull_history(conn, indexer: Indexer) -> List[Tuple[int, int]]:
+    if not checkTableExistence(conn, "history"): # create the table 
+        c = conn.cursor()
         c.execute('''CREATE TABLE history
                      (index_start INTEGER, index_end INTEGER)''')
         conn.commit()
         return []
     else:
+        c = conn.cursor()
         c.execute("SELECT * FROM history ORDER BY index_start")
-        history = cursor.fetch_all()
+        history = c.fetchall()
         if len(history) == None:
             return []
         else:
             ranges = merge_ranges(history)
+            print("Ranges already downloaded: ", ranges)
             return ranges
 
-def majority_vote(xs): 
+def majority_vote(xs: List[int]) -> int: 
     count = {} 
 
     for x in xs:
@@ -151,7 +160,7 @@ def majority_vote(xs):
     return key 
 
 # returns (number of pages, #items in last page) 
-def get_page_info() -> (int, int):
+def get_page_info() -> Tuple[int, int]:
     def total_page_number(): 
         URL = generate_url(1)
         data = getPageContent(URL)
@@ -182,7 +191,7 @@ def check_record_table(conn):
 
 
 KEYS_DELETE = ['ChangePercent', 'Close']
-def process(t):
+def process(t: Tuple[int, List[int]]):
     (page, items_loc) = t
     content = getPageContent(generate_url(page))
     data = content['data']
@@ -197,7 +206,7 @@ def process(t):
 
     return records 
 
-def download_range(r: (int, int), indexer: Indexer, pool: Pool):
+def download_range(r: Tuple[int, int], indexer: Indexer, pool: Pool):
     (left, right) = r 
     page_loc = [] 
     for i in range(left, right+1):
@@ -215,7 +224,7 @@ def download_range(r: (int, int), indexer: Indexer, pool: Pool):
 
     return records
 
-def break_range_if_too_large(r):
+def break_range_if_too_large(r: Tuple[int, int]):
   (start, end) = r 
 
   if end - start > 500:
@@ -223,10 +232,10 @@ def break_range_if_too_large(r):
 
     while start + 500 < end:
       intervals.append((start, start + 500))
-      start += 500 
+      start += 500 + 1 
 
-    if start < end:
-      intervals.append((start+1, end))
+    if start <= end:
+      intervals.append((start, end))
 
     return intervals
 
@@ -234,25 +243,29 @@ def break_range_if_too_large(r):
     return [r] 
 
 
-def main():
+def pull_data():
   def v_gen(xs):
     for x in xs:
       yield list(x.values())
+      
   conn = sqlite3.connect("survey.db") 
 
   (total_page, last_page_items) = get_page_info()
-  indexer = Indexer(total_page, last_page_items, 50)
+  print("#total pages {}, #items in last page {}".format(total_page, last_page_items))
+  indexer = Indexer(total_page, 50, last_page_items)
 
   pool = Pool()
 
-  check_record_table()
+  check_record_table(conn)
   history = pull_history(conn, indexer)
-  holes = find_range_holes(history)
+  holes = find_range_holes(history, indexer.total_range())
   
+  print("ready")
   for interval in holes:
     for subinterval in break_range_if_too_large(interval):
       (start, end) = subinterval
       logging.info("downloading records of range ({}, {})".format(start, end))
+      print("downloading records of range ({}, {})".format(start, end))
 
       records = download_range(subinterval, indexer, pool)
       c = conn.cursor()
@@ -264,7 +277,17 @@ def main():
       c.execute("COMMIT;")
 
 
+def main():
+  try:
+      pull_data()
+  except requests.exceptions.ConnectionError as e:
+      logging.error("Connection failed, details:\n", e)
+      main()
+
+
+
 if __name__ == "__main__":
+    logging.basicConfig(filename='activity.log', level=logging.INFO)
     main()
 
 
