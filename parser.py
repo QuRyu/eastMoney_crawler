@@ -10,24 +10,39 @@ from multiprocessing import Pool
 import requests 
 import sqlite3 
 
+# 生成获取数据的url地址并返回
+# 参数： 
+#       page_number: 数据页面的编号
 def generate_url(page_number: int) -> str:
     return "http://data.eastmoney.com/DataCenter_V3/jgdy/xx.ashx?pagesize=50&page={}&js=var%20AoofQLPM&param=&sortRule=-1&sortType=0&rt=52045947".format(page_number)
 
-# check if the table with the name has been created 
+# 检查数据库中是否有`name`对应的表格
+# Parameters: 
+#       conn: 数据库连接
+#       name: 表格名称
 def checkTableExistence(conn, name): 
     c = conn.cursor() 
     c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (name,)) 
     return len(c.fetchall()) == 1 
 
+# 下载参数`url`页面的数据
+# 
+# 每一次从指定页面下载的数据如果不正确，
+# 会等待两秒后再次尝试，原因为东方财富服务器不稳定，
+# 连续请求的结果是一样的
 def getPageContent(url):
+    # 下载并按照JSON格式解析数据内容
     request = requests.get(url=url) 
     try:
         data = json.loads(request.text[13:])
     except json.JSONDecodeError as e:
+        # 解析页面失败，原因可能是数据下载问题，
+        # 等待两秒后重新尝试
         logging.warning("JSON decode error on url {}\ntry again".format(url))
         time.sleep(2)
         return getPageContent(url)
 
+    # 确保下载的数据是有效的，不然重新下载当前页面
     if data['success'] and len(data['data']) != 0:
         return data
     else: 
@@ -36,6 +51,7 @@ def getPageContent(url):
         time.sleep(2)
         return getPageContent(url)
 
+# 以下为原注释，使用了Divide and conquer的方法来实现
 # merge ranges together 
 # e.g. merge [(1,3), (4,7), (10, 12), (13, 15)] into [(1, 7), (10, 15)]
 # Invariance: 1. Each range does not overlap with others, 
@@ -68,6 +84,8 @@ def merge_ranges(history: List[Tuple[int, int]]) -> List[Tuple[int, int]]:
             left.extend(right)
             return left 
 
+# 对于给定的ranges，找到中间缺少的部分
+# e.g. [(1, 5), (8, 10)] 的缺少部分为 [(6,7)]
 def find_range_holes(ranges: List[Tuple[int, int]], min_max_range: Tuple[int, int]) -> List[Tuple[int, int]]:
     if len(ranges) == 0:
         return [min_max_range]
@@ -92,6 +110,7 @@ def find_range_holes(ranges: List[Tuple[int, int]], min_max_range: Tuple[int, in
     return holes
 
 
+# 给定总页数和每个页面中的数据条数，`Indexer`给每一条数据一个唯一的id
 class Indexer:
     def __init__(self, total_page, items_in_page, last_page_items):
         self.total_page = total_page
@@ -100,12 +119,14 @@ class Indexer:
 
         self.total_items = (total_page-1) * self.items_in_page + last_page_items
 
+    # 给定单条数据所在的页面和页面中的位置，返回数据的id 
     def index(self, page: int, pos: int) -> int:
         if page == self.total_page:
             return self.last_page_items - pos + 1
         else:
             return (self.total_page - page - 1) * self.items_in_page + self.last_page_items + (self.items_in_page - pos + 1)
 
+    # 给定数据ID，返回其所在页面和页面位置
     def rev_index(self, id: int) -> Tuple[int, int]: 
         if id <= self.last_page_items:
             return (self.total_page, self.last_page_items-id+1)
@@ -120,9 +141,11 @@ class Indexer:
 
             return (self.total_page-1-relative_page, self.items_in_page-relative_pos+1)
 
+    # 返回数据ID的最小和最大值 
     def total_range(self) -> Tuple[int, int]: 
         return (1, (self.total_page-1)*self.items_in_page + self.last_page_items)
 
+# 从数据库中读取已经读取了的数据id范围
 def pull_history(conn, indexer: Indexer) -> List[Tuple[int, int]]:
     if not checkTableExistence(conn, "history"): # create the table 
         c = conn.cursor()
@@ -159,6 +182,7 @@ def majority_vote(xs: List[int]) -> int:
 
     return key 
 
+# 返回总页数和每一页中的数据数量
 # returns (number of pages, #items in last page) 
 def get_page_info() -> Tuple[int, int]:
     def total_page_number(): 
@@ -178,6 +202,7 @@ def get_page_info() -> Tuple[int, int]:
 
     return (N, len(data))
 
+# 确认数据库是否建立，如果没有则创建
 def check_record_table(conn):
     if not checkTableExistence(conn, 'records'):
         c = conn.cursor()
@@ -190,6 +215,7 @@ def check_record_table(conn):
                       Maincontent text) ''')
 
 
+# parse每一页的数据
 KEYS_DELETE = ['ChangePercent', 'Close']
 def process(t: Tuple[int, List[int]]):
     (page, items_loc) = t
@@ -206,6 +232,7 @@ def process(t: Tuple[int, List[int]]):
 
     return records 
 
+# 根据给定的数据ID范围，下载对应的数据
 def download_range(r: Tuple[int, int], indexer: Indexer, pool: Pool):
     (left, right) = r 
     page_loc = [] 
@@ -224,7 +251,8 @@ def download_range(r: Tuple[int, int], indexer: Indexer, pool: Pool):
 
     return records
 
-def break_range_if_too_large(r: Tuple[int, int]):
+# 如果给定的数据ID范围太大，将其多个小的范围
+def break_range_if_too_large(r: Tuple[int, int]) -> List[Tuple[int, int]]:
   (start, end) = r 
 
   if end - start > 500:
@@ -243,6 +271,7 @@ def break_range_if_too_large(r: Tuple[int, int]):
     return [r] 
 
 
+# 下载数据
 def pull_data():
   def v_gen(xs):
     for x in xs:
