@@ -38,7 +38,7 @@ def getPageContent(url):
     except json.JSONDecodeError as e:
         # 解析页面失败，原因可能是数据下载问题，
         # 等待两秒后重新尝试
-        logging.warning("JSON decode error on url {}\ntry again".format(url))
+        logging.debug("JSON decode error on url {}\ntry again".format(url))
         time.sleep(2)
         return getPageContent(url)
 
@@ -47,7 +47,7 @@ def getPageContent(url):
         return data
     else: 
         if len(data['data']) == 0:
-          logging.warning("empty data field from url {}".format(url))
+          logging.debug("empty data field from url {}".format(url))
         time.sleep(2)
         return getPageContent(url)
 
@@ -310,7 +310,7 @@ def main():
   try:
       pull_data()
   except requests.exceptions.ConnectionError as e:
-      logging.error("Connection failed, details:\n", e)
+      logging.debug("Connection failed, details:\n", e)
       main()
 
 
